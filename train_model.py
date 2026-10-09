@@ -4,53 +4,91 @@ import joblib
 import numpy as np
 import pandas as pd
 
+from sklearn.compose import ColumnTransformer
 from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, confusion_matrix
 from sklearn.model_selection import train_test_split
 from sklearn.pipeline import Pipeline
-from sklearn.preprocessing import StandardScaler
+from sklearn.preprocessing import OneHotEncoder, StandardScaler
 
 
-def create_dataset():
-    rng = np.random.default_rng(42)
-    number_of_students = 300
+def create_dataset(number_of_customers=600, random_state=42):
+    """Create a reproducible synthetic telecom customer churn dataset."""
+    rng = np.random.default_rng(random_state)
 
     data = pd.DataFrame({
-        "attendance": rng.integers(50, 101, number_of_students),
-        "internal_marks": rng.integers(20, 101, number_of_students),
-        "assignment_marks": rng.integers(30, 101, number_of_students),
-        "previous_score": rng.integers(30, 101, number_of_students)
+        "tenure": rng.integers(1, 73, number_of_customers),
+        "monthly_charges": rng.uniform(25, 120, number_of_customers).round(2),
+        "contract": rng.choice(
+            ["Month-to-month", "One year", "Two year"],
+            number_of_customers,
+            p=[0.60, 0.25, 0.15]
+        ),
+        "tech_support": rng.choice(
+            ["Yes", "No"], number_of_customers, p=[0.35, 0.65]
+        ),
+        "internet_service": rng.choice(
+            ["DSL", "Fiber optic", "No"],
+            number_of_customers,
+            p=[0.35, 0.50, 0.15]
+        ),
+        "payment_method": rng.choice(
+            ["Electronic check", "Credit card", "Bank transfer"],
+            number_of_customers
+        )
     })
 
-    data["weighted_score"] = (
-        0.25 * data["attendance"]
-        + 0.35 * data["internal_marks"]
-        + 0.20 * data["assignment_marks"]
-        + 0.20 * data["previous_score"]
+    # Synthetic target: 1 = CHURN, 0 = NO CHURN.
+    churn_score = (
+        1.5 * (data["contract"] == "Month-to-month").astype(int)
+        + 0.9 * (data["tenure"] < 18).astype(int)
+        + 0.7 * (data["monthly_charges"] > 85).astype(int)
+        + 0.8 * (data["tech_support"] == "No").astype(int)
+        + 0.4 * (data["internet_service"] == "Fiber optic").astype(int)
     )
 
-    # 1 = PASS, 0 = FAIL
-    data["result"] = (data["weighted_score"] >= 60).astype(int)
+    churn = (churn_score >= 2.4).astype(int)
+
+    # Add a small amount of label noise for a more realistic demonstration.
+    flip = rng.random(number_of_customers) < 0.04
+    data["churn"] = np.where(flip, 1 - churn, churn)
+
     return data
 
 
 def train_model():
-    print("Creating dataset...")
+    print("Creating telecom customer churn dataset...")
     data = create_dataset()
-    data.to_csv("student_results.csv", index=False)
+    data.to_csv("telecom_churn.csv", index=False)
 
     print("Dataset created successfully.")
     print("Number of records:", len(data))
 
     features = [
-        "attendance",
-        "internal_marks",
-        "assignment_marks",
-        "previous_score"
+        "tenure",
+        "monthly_charges",
+        "contract",
+        "tech_support",
+        "internet_service",
+        "payment_method"
     ]
 
     X = data[features]
-    y = data["result"]
+    y = data["churn"]
+
+    numeric_features = ["tenure", "monthly_charges"]
+    categorical_features = [
+        "contract",
+        "tech_support",
+        "internet_service",
+        "payment_method"
+    ]
+
+    preprocessor = ColumnTransformer([
+        ("numeric", StandardScaler(), numeric_features),
+        ("categorical", OneHotEncoder(handle_unknown="ignore"),
+         categorical_features)
+    ])
 
     X_train, X_test, y_train, y_test = train_test_split(
         X,
@@ -64,11 +102,11 @@ def train_model():
     print("Testing records :", len(X_test))
 
     model = Pipeline([
-        ("scaler", StandardScaler()),
+        ("preprocessor", preprocessor),
         ("classifier", LogisticRegression(max_iter=1000, random_state=42))
     ])
 
-    print("Training model...")
+    print("Training Logistic Regression model...")
     model.fit(X_train, y_train)
 
     predictions = model.predict(X_test)
@@ -81,16 +119,18 @@ def train_model():
     print("\nConfusion Matrix:")
     print(matrix)
 
-    joblib.dump(model, "student_result_model.pkl")
-    print("\nModel saved as student_result_model.pkl")
+    joblib.dump(model, "telecom_churn_model.pkl")
+    print("\nModel saved as telecom_churn_model.pkl")
 
     metrics = {
         "accuracy": float(accuracy),
-        "training_records": len(X_train),
-        "testing_records": len(X_test)
+        "training_records": int(len(X_train)),
+        "testing_records": int(len(X_test)),
+        "model_name": "Logistic Regression",
+        "dataset": "Synthetic Telecom Customer Churn"
     }
 
-    with open("metrics.json", "w") as file:
+    with open("metrics.json", "w", encoding="utf-8") as file:
         json.dump(metrics, file, indent=4)
 
     print("Metrics saved as metrics.json")
